@@ -10,7 +10,7 @@ use spectrograph::{
 };
 
 fn main() {
-    // Assume `stft` was produced earlier by your STFT engine.
+    // Assume `stft` was produced earlier by your STFT or CWT engine.
     // It contains:
     // - stft.data  (2D frequency x time buffer)
     // - stft.width (number of frames)
