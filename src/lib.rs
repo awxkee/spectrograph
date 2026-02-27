@@ -104,7 +104,7 @@ pub enum Normalizer {
     },
 }
 
-pub struct SpectrumFrame<'a, T: ToOwned>
+pub struct SpectrographFrame<'a, T: ToOwned>
 where
     [T]: ToOwned,
 {

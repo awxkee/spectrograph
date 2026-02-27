@@ -17,7 +17,7 @@ fn main() {
     // - stft.height (number of frequency bins)
 
     let image = rgb_spectrograph_color_f32(
-        &SpectrumFrame {
+        &SpectrographFrame {
             data: std::borrow::Cow::Borrowed(stft.data.borrow()),
             width: stft.width,
             height: stft.height,

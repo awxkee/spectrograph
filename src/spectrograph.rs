@@ -29,7 +29,7 @@
 use crate::err::{SpectrographError, try_vec};
 use crate::mla::fmla;
 use crate::normalizer::{normalize_power, normalize_real};
-use crate::{SpectroSample, SpectrographOptions, SpectrumFrame};
+use crate::{SpectroSample, SpectrographOptions, SpectrographFrame};
 use num_complex::Complex;
 use num_traits::AsPrimitive;
 
@@ -98,7 +98,7 @@ fn bilinear_sample(
 }
 
 fn draw_scalogram_color_impl<T: SpectroSample, const N: usize>(
-    frame: &SpectrumFrame<Complex<T>>,
+    frame: &SpectrographFrame<Complex<T>>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError>
 where
@@ -169,7 +169,7 @@ where
 }
 
 fn draw_scalogram_real_color_impl<T: SpectroSample, const N: usize>(
-    frame: &SpectrumFrame<T>,
+    frame: &SpectrographFrame<T>,
     spectrograph_options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError>
 where
@@ -239,56 +239,56 @@ where
 }
 
 pub fn rgb_spectrograph_color_f32(
-    frame: &SpectrumFrame<Complex<f32>>,
+    frame: &SpectrographFrame<Complex<f32>>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
     draw_scalogram_color_impl::<f32, 3>(frame, options)
 }
 
 pub fn rgb_spectrograph_color_f64(
-    frame: &SpectrumFrame<Complex<f64>>,
+    frame: &SpectrographFrame<Complex<f64>>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
     draw_scalogram_color_impl::<f64, 3>(frame, options)
 }
 
 pub fn rgba_spectrograph_color_f32(
-    frame: &SpectrumFrame<Complex<f32>>,
+    frame: &SpectrographFrame<Complex<f32>>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
     draw_scalogram_color_impl::<f32, 4>(frame, options)
 }
 
 pub fn rgba_spectrograph_color_f64(
-    frame: &SpectrumFrame<Complex<f64>>,
+    frame: &SpectrographFrame<Complex<f64>>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
     draw_scalogram_color_impl::<f64, 4>(frame, options)
 }
 
 pub fn rgb_real_spectrograph_color_f32(
-    frame: &SpectrumFrame<f32>,
+    frame: &SpectrographFrame<f32>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
     draw_scalogram_real_color_impl::<f32, 3>(frame, options)
 }
 
 pub fn rgb_real_spectrograph_color_f64(
-    frame: &SpectrumFrame<f64>,
+    frame: &SpectrographFrame<f64>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
     draw_scalogram_real_color_impl::<f64, 3>(frame, options)
 }
 
 pub fn rgba_real_spectrograph_color_f32(
-    frame: &SpectrumFrame<f32>,
+    frame: &SpectrographFrame<f32>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
     draw_scalogram_real_color_impl::<f32, 4>(frame, options)
 }
 
 pub fn rgba_real_spectrograph_color_f64(
-    frame: &SpectrumFrame<f64>,
+    frame: &SpectrographFrame<f64>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
     draw_scalogram_real_color_impl::<f64, 4>(frame, options)
