@@ -1,0 +1,26 @@
+[package]
+name = "spectrograph"
+version = "0.1.0"
+edition = "2024"
+description = "Spectrograph and spectrogram rendering"
+readme = "README.md"
+keywords = ["dsp", "spectrogram", "scalogram"]
+license = "BSD-3-Clause OR Apache-2.0"
+authors = ["Radzivon Bartoshyk"]
+documentation = "https://github.com/awxkee/spectrograph"
+categories = ["algorithms", "science"]
+homepage = "https://github.com/awxkee/spectrograph"
+repository = "https://github.com/awxkee/spectrograph"
+exclude = ["*.jpg", "/assets", "*.png", "*.sh", "/assets/*"]
+rust-version = "1.88.0"
+
+[dependencies]
+num-traits = "0.2.19"
+num-complex = "0.4.6"
+pxfm = "0.1.27"
+
+[package.metadata.docs.rs]
+# To build locally:
+# RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --all-features --no-deps --open --manifest-path ./Cargo.toml
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
