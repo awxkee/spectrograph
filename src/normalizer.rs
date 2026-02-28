@@ -232,11 +232,16 @@ where
             let floor = floor_db;
             // find peak power for relative normalization (librosa-style)
             let max_power = frame.iter().map(|&v| (v * v).as_()).fold(0.0f32, f32::max);
+            let max_power_recip = if max_power != 0. {
+                max_power.recip()
+            } else {
+                0.
+            };
 
             for (dst, &v) in output.iter_mut().zip(frame.iter()) {
                 let power: f32 = (v * v).as_();
                 let db = if max_power > 1e-10 && power > 1e-10 {
-                    10.0 * (power / max_power).log10()
+                    10.0 * f_log10f(power * max_power_recip)
                 } else {
                     floor
                 };
@@ -248,7 +253,7 @@ where
             let mut max = 0.0f32;
             for (dst, &v) in output.iter_mut().zip(frame.iter()) {
                 let p: f32 = (v * v).as_();
-                let lm = p.ln_1p();
+                let lm = f_log1pf(p);
                 max = max.max(lm);
                 *dst = lm;
             }
