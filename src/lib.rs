@@ -34,6 +34,7 @@ use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub};
 
 mod colormap;
 mod err;
+mod interpolator;
 mod mla;
 mod normalizer;
 mod spectrograph;
@@ -68,12 +69,23 @@ pub trait SpectroSample:
 impl SpectroSample for f32 {}
 impl SpectroSample for f64 {}
 
+/// Configuration for spectrograph/scalogram rendering.
+///
+/// Controls output dimensions, color mapping, normalization, and interpolation
+/// quality. Pass this to the renderer to produce a final image.
 #[derive(Debug, Copy, Clone)]
 pub struct SpectrographOptions {
+    /// Width of the output image in pixels.
     pub out_width: usize,
+    /// Height of the output image in pixels.
     pub out_height: usize,
+    /// Colormap applied to normalized magnitude values.
     pub colormap: Colormap,
+    /// Strategy used to normalize raw magnitude data before colormapping.
     pub normalizer: Normalizer,
+    /// Interpolation algorithm used when resampling the spectrograph data
+    /// to the output dimensions.
+    pub interpolator: Interpolator,
 }
 
 #[derive(Debug, Default, PartialOrd, PartialEq, Copy, Clone)]
@@ -102,6 +114,19 @@ pub enum Normalizer {
         /// Half-window size in bins
         radius: usize,
     },
+}
+
+/// Interpolation algorithm used when resampling spectrograph/scalogram data.
+#[derive(Debug, Default, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
+pub enum Interpolator {
+    /// Bilinear interpolation — fast, suitable for real-time preview and
+    /// low-latency rendering. Introduces some blurring but no ringing.
+    #[default]
+    Bilinear,
+    /// Catmull-Rom cubic interpolation — smooth C1-continuous resampling with
+    /// good frequency preservation. The recommended default for offline rendering
+    /// and export.
+    CatmullRom,
 }
 
 pub struct SpectrographFrame<'a, T: ToOwned>

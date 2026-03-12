@@ -60,3 +60,14 @@ pub(crate) fn fmla<T: Copy + Mul<T, Output = T> + Add<T, Output = T> + MulAdd<T,
 ) -> T {
     a * b + c
 }
+
+pub(crate) trait FusedMadd {
+    fn mla(self, b: Self, c: Self) -> Self;
+}
+
+impl FusedMadd for f32 {
+    #[inline(always)]
+    fn mla(self, b: Self, c: Self) -> Self {
+        fmla(self, b, c)
+    }
+}
