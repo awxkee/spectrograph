@@ -2,7 +2,7 @@
 name = "spectrograph"
 version = "0.2.0"
 edition = "2024"
-description = "Spectrograph and spectrogram rendering"
+description = "Spectrogram and scalogram rendering"
 readme = "README.md"
 keywords = ["dsp", "spectrogram", "scalogram"]
 license = "BSD-3-Clause OR Apache-2.0"
