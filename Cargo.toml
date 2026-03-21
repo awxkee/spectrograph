@@ -12,7 +12,7 @@ categories = ["algorithms", "science"]
 homepage = "https://github.com/awxkee/spectrograph"
 repository = "https://github.com/awxkee/spectrograph"
 exclude = ["*.jpg", "/assets", "*.png", "*.sh", "/assets/*"]
-rust-version = "1.88.0"
+rust-version = "1.89.0"
 
 [dependencies]
 num-traits = "0.2.19"
