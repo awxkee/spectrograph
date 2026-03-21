@@ -36,6 +36,7 @@ use pxfm::{f_log1pf, f_log10f};
 pub(crate) fn normalize_power<T: SpectroSample>(
     coeffs: &[Complex<T>],
     normalizer: Normalizer,
+    width: usize,
 ) -> Result<Vec<f32>, SpectrographError>
 where
     f64: AsPrimitive<T>,
@@ -45,10 +46,15 @@ where
     match normalizer {
         Normalizer::Power => {
             let mut max = T::zero();
-            for (dst, v) in output.iter_mut().zip(coeffs.iter()) {
-                let p = fmla(v.re, v.re, v.im * v.im);
-                max = max.max(p);
-                *dst = p.as_();
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let p = fmla(v.re, v.re, v.im * v.im);
+                    max = max.max(p);
+                    *dst = p.as_();
+                }
             }
             let inv: f32 = if max > T::zero() {
                 1f32 / max.as_()
@@ -62,10 +68,15 @@ where
 
         Normalizer::Magnitude => {
             let mut max = T::zero();
-            for (dst, v) in output.iter_mut().zip(coeffs.iter()) {
-                let m = fmla(v.re, v.re, v.im * v.im).sqrt();
-                max = max.max(m);
-                *dst = m.as_();
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let m = fmla(v.re, v.re, v.im * v.im).sqrt();
+                    max = max.max(m);
+                    *dst = m.as_();
+                }
             }
             let inv = if max > T::zero() {
                 1.0 / max.as_()
@@ -81,10 +92,15 @@ where
             // sqrt(power) = magnitude, but normalized against sqrt(max_power)
             // rather than max_magnitude — subtly different scaling
             let mut max_power = T::zero();
-            for (dst, v) in output.iter_mut().zip(coeffs.iter()) {
-                let p = fmla(v.re, v.re, v.im * v.im);
-                max_power = max_power.max(p);
-                *dst = p.as_();
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let p = fmla(v.re, v.re, v.im * v.im);
+                    max_power = max_power.max(p);
+                    *dst = p.as_();
+                }
             }
             let inv = if max_power > T::zero() {
                 1f32 / max_power.sqrt().as_()
@@ -99,26 +115,36 @@ where
         Normalizer::DecibelsDb { floor_db } => {
             let floor = floor_db;
             let recip_floor = -1f32 / floor;
-            for (dst, v) in output.iter_mut().zip(coeffs.iter()) {
-                let power: f32 = fmla(v.re, v.re, v.im * v.im).as_();
-                let db = if power > 1e-10 {
-                    10.0 * f_log10f(power)
-                } else {
-                    floor
-                };
-                // map [floor_db, 0] → [0, 1]
-                *dst = ((db - floor) * recip_floor).min(1.0).max(0.0);
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let power: f32 = fmla(v.re, v.re, v.im * v.im).as_();
+                    let db = if power > 1e-10 {
+                        10.0 * f_log10f(power)
+                    } else {
+                        floor
+                    };
+                    // map [floor_db, 0] → [0, 1]
+                    *dst = ((db - floor) * recip_floor).min(1.0).max(0.0);
+                }
             }
             // already normalized by construction, no second pass needed
         }
 
         Normalizer::LogMagnitude => {
             let mut max = 0.0f32;
-            for (dst, v) in output.iter_mut().zip(coeffs.iter()) {
-                let m: f32 = fmla(v.re, v.re, v.im * v.im).as_();
-                let lm = f_log1pf(m); // log(1 + magnitude²)
-                max = max.max(lm);
-                *dst = lm;
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let m: f32 = fmla(v.re, v.re, v.im * v.im).as_();
+                    let lm = f_log1pf(m); // log(1 + magnitude²)
+                    max = max.max(lm);
+                    *dst = lm;
+                }
             }
             let inv = if max > 0.0 { 1.0 / max } else { 0.0 };
             for v in output.iter_mut() {
@@ -128,10 +154,15 @@ where
 
         Normalizer::MeanNormalized => {
             let mut sum = 0.0f32;
-            for (dst, v) in output.iter_mut().zip(coeffs.iter()) {
-                let p: f32 = fmla(v.re, v.re, v.im * v.im).as_();
-                sum += p;
-                *dst = p;
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let p: f32 = fmla(v.re, v.re, v.im * v.im).as_();
+                    sum += p;
+                    *dst = p;
+                }
             }
             let mean = if coeffs.is_empty() {
                 1.0
@@ -147,8 +178,13 @@ where
 
         Normalizer::LocalMax { radius } => {
             // First pass: fill output with power
-            for (dst, v) in output.iter_mut().zip(coeffs.iter()) {
-                *dst = fmla(v.re, v.re, v.im * v.im).as_();
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    *dst = fmla(v.re, v.re, v.im * v.im).as_();
+                }
             }
             // Second pass: divide each bin by its local max
             let source = output.clone();
@@ -170,6 +206,7 @@ where
 pub(crate) fn normalize_real<T: SpectroSample>(
     frame: &[T],
     normalizer: Normalizer,
+    width: usize,
 ) -> Result<Vec<f32>, SpectrographError>
 where
     f64: AsPrimitive<T>,
@@ -179,10 +216,15 @@ where
     match normalizer {
         Normalizer::Power => {
             let mut max = T::zero();
-            for (dst, &v) in output.iter_mut().zip(frame.iter()) {
-                let p = v * v;
-                max = max.max(p);
-                *dst = p.as_();
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, &v) in dst.iter_mut().zip(v.iter()) {
+                    let p = v * v;
+                    max = max.max(p);
+                    *dst = p.as_();
+                }
             }
             let inv = if max > T::zero() {
                 1.0 / max.as_()
@@ -196,10 +238,15 @@ where
 
         Normalizer::Magnitude => {
             let mut max = T::zero();
-            for (dst, &v) in output.iter_mut().zip(frame.iter()) {
-                let m = v.abs();
-                max = max.max(m);
-                *dst = m.as_();
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let m = v.abs();
+                    max = max.max(m);
+                    *dst = m.as_();
+                }
             }
             let inv = if max > T::zero() {
                 1.0 / max.as_()
@@ -213,10 +260,15 @@ where
 
         Normalizer::PowerSqrt => {
             let mut max_power = T::zero();
-            for (dst, &v) in output.iter_mut().zip(frame.iter()) {
-                let p = v * v;
-                max_power = max_power.max(p);
-                *dst = p.as_();
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, &v) in dst.iter_mut().zip(v.iter()) {
+                    let p = v * v;
+                    max_power = max_power.max(p);
+                    *dst = p.as_();
+                }
             }
             let inv = if max_power > T::zero() {
                 1.0 / max_power.as_().sqrt()
@@ -238,24 +290,34 @@ where
                 0.
             };
 
-            for (dst, &v) in output.iter_mut().zip(frame.iter()) {
-                let power: f32 = (v * v).as_();
-                let db = if max_power > 1e-10 && power > 1e-10 {
-                    10.0 * f_log10f(power * max_power_recip)
-                } else {
-                    floor
-                };
-                *dst = ((db - floor) / (-floor)).clamp(0.0, 1.0);
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, &v) in dst.iter_mut().zip(v.iter()) {
+                    let power: f32 = (v * v).as_();
+                    let db = if max_power > 1e-10 && power > 1e-10 {
+                        10.0 * f_log10f(power * max_power_recip)
+                    } else {
+                        floor
+                    };
+                    *dst = ((db - floor) / (-floor)).clamp(0.0, 1.0);
+                }
             }
         }
 
         Normalizer::LogMagnitude => {
             let mut max = 0.0f32;
-            for (dst, &v) in output.iter_mut().zip(frame.iter()) {
-                let p: f32 = (v * v).as_();
-                let lm = f_log1pf(p);
-                max = max.max(lm);
-                *dst = lm;
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, &v) in dst.iter_mut().zip(v.iter()) {
+                    let p: f32 = (v * v).as_();
+                    let lm = f_log1pf(p);
+                    max = max.max(lm);
+                    *dst = lm;
+                }
             }
             let inv = if max > 0.0 { 1.0 / max } else { 0.0 };
             for v in output.iter_mut() {
@@ -265,10 +327,15 @@ where
 
         Normalizer::MeanNormalized => {
             let mut sum = 0.0f32;
-            for (dst, &v) in output.iter_mut().zip(frame.iter()) {
-                let p: f32 = (v * v).as_();
-                sum += p;
-                *dst = p;
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, &v) in dst.iter_mut().zip(v.iter()) {
+                    let p: f32 = (v * v).as_();
+                    sum += p;
+                    *dst = p;
+                }
             }
             let mean = if frame.is_empty() {
                 1.0
@@ -282,8 +349,13 @@ where
         }
 
         Normalizer::LocalMax { radius } => {
-            for (dst, &v) in output.iter_mut().zip(frame.iter()) {
-                *dst = (v * v).as_();
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, &v) in dst.iter_mut().zip(v.iter()) {
+                    *dst = (v * v).as_();
+                }
             }
             let source = output.clone();
             for (i, dst) in output.iter_mut().enumerate() {

@@ -27,12 +27,12 @@
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 use crate::err::{SpectrographError, try_vec};
-use crate::interpolator::{BilinearInterpolator, CatmullRomInterpolator, Sampler};
 use crate::mla::fmla;
 use crate::normalizer::{normalize_power, normalize_real};
-use crate::{Interpolator, SpectroSample, SpectrographFrame, SpectrographOptions};
+use crate::{SpectroSample, SpectrographFrame, SpectrographOptions};
 use num_complex::Complex;
 use num_traits::AsPrimitive;
+use pic_scale::{ImageSize, ImageStore, ImageStoreMut};
 
 #[inline(always)]
 fn normalized_to_intensity(x: f32) -> f32 {
@@ -67,10 +67,9 @@ impl ColormapHandle<'_> {
     }
 }
 
-fn draw_scalogram_color_impl<T: SpectroSample, I: Sampler, const N: usize>(
+fn draw_scalogram_color_impl<T: SpectroSample, const N: usize>(
     frame: &SpectrographFrame<Complex<T>>,
     options: SpectrographOptions,
-    sampler: I,
 ) -> Result<Vec<u8>, SpectrographError>
 where
     f64: AsPrimitive<T>,
@@ -102,14 +101,8 @@ where
     assert_eq!(r_slice.len(), g_slice.len());
     assert_eq!(r_slice.len(), b_slice.len());
 
-    let src_h = frame.height;
-    let src_w = frame.width;
-
-    let norm = normalize_power(frame.data.as_ref(), options.normalizer)?;
+    let norm = normalize_power(frame.data.as_ref(), options.normalizer, frame.width)?;
     let mut img = try_vec![0u8; out_width * out_height * N];
-
-    let sx = (src_w - 1) as f32 / (out_width - 1) as f32;
-    let sy = (src_h - 1) as f32 / (out_height - 1) as f32;
 
     let handle = ColormapHandle {
         r_slice,
@@ -118,15 +111,59 @@ where
         cap: r_slice.len() as f32 - 1.,
     };
 
-    for (oy, row) in img.chunks_exact_mut(out_width * N).enumerate() {
+    let resizing_plan = options
+        .context
+        .map(|x| Ok(x.scaler.clone()))
+        .unwrap_or_else(|| {
+            let resizer = pic_scale::Scaler::new(options.interpolator.to_pic_scale());
+            resizer
+                .plan_planar_resampling_f32(
+                    ImageSize::new(frame.width, frame.height),
+                    ImageSize::new(out_width, out_height),
+                )
+                .map_err(|x| SpectrographError::Generic(x.to_string()))
+        })?;
+
+    if resizing_plan.source_size() != ImageSize::new(frame.width, frame.height) {
+        return Err(SpectrographError::Generic(
+            format!(
+                "Invalid source size in passed context, expected {:?}, but got {:?}",
+                resizing_plan.source_size(),
+                ImageSize::new(frame.width, frame.height)
+            )
+            .to_string(),
+        ));
+    }
+    if resizing_plan.target_size() != ImageSize::new(out_width, out_height) {
+        return Err(SpectrographError::Generic(
+            format!(
+                "Invalid source size in passed context, expected {:?}, but got {:?}",
+                resizing_plan.target_size(),
+                ImageSize::new(out_width, out_height)
+            )
+            .to_string(),
+        ));
+    }
+
+    let mut resized = ImageStoreMut::<f32, 1>::alloc(out_width, out_height);
+    let s_frame = ImageStore::<f32, 1>::borrow(&norm, frame.width, frame.height)
+        .map_err(|x| SpectrographError::Generic(x.to_string()))?;
+    resizing_plan
+        .resample(&s_frame, &mut resized)
+        .map_err(|x| SpectrographError::Generic(x.to_string()))?;
+
+    for (src_row, dst_row) in resized
+        .buffer
+        .borrow()
+        .chunks_exact(out_width)
+        .zip(img.chunks_exact_mut(out_width * N))
+    {
         // flip vertically (high freq on top)
-        let src_y = (out_height - 1 - oy) as f32 * sy;
-
-        for (ox, px) in row.as_chunks_mut::<N>().0.iter_mut().enumerate() {
-            let src_x = ox as f32 * sx;
-
-            let v = sampler.sample(&norm, frame.width, frame.width, frame.height, src_y, src_x);
-            let new_rgb = handle.interpolate(v);
+        for (&src_px, px) in src_row
+            .iter()
+            .zip(dst_row.as_chunks_mut::<N>().0.iter_mut())
+        {
+            let new_rgb = handle.interpolate(src_px.max(0.).min(1.));
             px[0] = new_rgb[0];
             px[1] = new_rgb[1];
             px[2] = new_rgb[2];
@@ -139,10 +176,9 @@ where
     Ok(img)
 }
 
-fn draw_scalogram_real_color_impl<T: SpectroSample, S: Sampler, const N: usize>(
+fn draw_scalogram_real_color_impl<T: SpectroSample, const N: usize>(
     frame: &SpectrographFrame<T>,
     spectrograph_options: SpectrographOptions,
-    sampler: S,
 ) -> Result<Vec<u8>, SpectrographError>
 where
     f64: AsPrimitive<T>,
@@ -173,14 +209,12 @@ where
     assert_eq!(r_slice.len(), g_slice.len());
     assert_eq!(r_slice.len(), b_slice.len());
 
-    let src_h = frame.height;
-    let src_w = frame.width;
-
-    let norm = normalize_real(frame.data.as_ref(), spectrograph_options.normalizer)?;
+    let norm = normalize_real(
+        frame.data.as_ref(),
+        spectrograph_options.normalizer,
+        frame.width,
+    )?;
     let mut img = try_vec![0u8; out_width * out_height * N];
-
-    let sx = (src_w - 1) as f32 / (out_width - 1) as f32;
-    let sy = (src_h - 1) as f32 / (out_height - 1) as f32;
 
     let handle = ColormapHandle {
         r_slice,
@@ -189,15 +223,58 @@ where
         cap: r_slice.len() as f32 - 1.,
     };
 
-    for (oy, row) in img.chunks_exact_mut(out_width * N).enumerate() {
-        // flip vertically (high freq on top)
-        let src_y = (out_height - 1 - oy) as f32 * sy;
+    let resizing_plan = spectrograph_options
+        .context
+        .map(|x| Ok(x.scaler.clone()))
+        .unwrap_or_else(|| {
+            let resizer = pic_scale::Scaler::new(spectrograph_options.interpolator.to_pic_scale());
+            resizer
+                .plan_planar_resampling_f32(
+                    ImageSize::new(frame.width, frame.height),
+                    ImageSize::new(out_width, out_height),
+                )
+                .map_err(|x| SpectrographError::Generic(x.to_string()))
+        })?;
 
-        for (ox, px) in row.as_chunks_mut::<N>().0.iter_mut().enumerate() {
-            let src_x = ox as f32 * sx;
+    if resizing_plan.source_size() != ImageSize::new(frame.width, frame.height) {
+        return Err(SpectrographError::Generic(
+            format!(
+                "Invalid source size in passed context, expected {:?}, but got {:?}",
+                resizing_plan.source_size(),
+                ImageSize::new(frame.width, frame.height)
+            )
+            .to_string(),
+        ));
+    }
+    if resizing_plan.target_size() != ImageSize::new(out_width, out_height) {
+        return Err(SpectrographError::Generic(
+            format!(
+                "Invalid source size in passed context, expected {:?}, but got {:?}",
+                resizing_plan.target_size(),
+                ImageSize::new(out_width, out_height)
+            )
+            .to_string(),
+        ));
+    }
 
-            let v = sampler.sample(&norm, frame.width, frame.width, frame.height, src_y, src_x);
-            let new_rgb = handle.interpolate(v);
+    let mut resized = ImageStoreMut::<f32, 1>::alloc(out_width, out_height);
+    let s_frame = ImageStore::<f32, 1>::borrow(&norm, frame.width, frame.height)
+        .map_err(|x| SpectrographError::Generic(x.to_string()))?;
+    resizing_plan
+        .resample(&s_frame, &mut resized)
+        .map_err(|x| SpectrographError::Generic(x.to_string()))?;
+
+    for (src_row, dst_row) in resized
+        .buffer
+        .borrow()
+        .chunks_exact(out_width)
+        .zip(img.chunks_exact_mut(out_width * N))
+    {
+        for (&src_px, px) in src_row
+            .iter()
+            .zip(dst_row.as_chunks_mut::<N>().0.iter_mut())
+        {
+            let new_rgb = handle.interpolate(src_px.max(0.).min(1.));
             px[0] = new_rgb[0];
             px[1] = new_rgb[1];
             px[2] = new_rgb[2];
@@ -210,134 +287,86 @@ where
     Ok(img)
 }
 
-fn rgbx_spectrograph_color_f32<const S: usize>(
+fn rgbx_spectrograph_f32<const S: usize>(
     frame: &SpectrographFrame<Complex<f32>>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
-    match options.interpolator {
-        Interpolator::Bilinear => draw_scalogram_color_impl::<f32, BilinearInterpolator, S>(
-            frame,
-            options,
-            BilinearInterpolator {},
-        ),
-        Interpolator::CatmullRom => draw_scalogram_color_impl::<f32, CatmullRomInterpolator, S>(
-            frame,
-            options,
-            CatmullRomInterpolator {},
-        ),
-    }
+    draw_scalogram_color_impl::<f32, S>(frame, options)
 }
 
-fn rgbx_spectrograph_color_f64<const S: usize>(
+fn rgbx_spectrograph_f64<const S: usize>(
     frame: &SpectrographFrame<Complex<f64>>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
-    match options.interpolator {
-        Interpolator::Bilinear => draw_scalogram_color_impl::<f64, BilinearInterpolator, S>(
-            frame,
-            options,
-            BilinearInterpolator {},
-        ),
-        Interpolator::CatmullRom => draw_scalogram_color_impl::<f64, CatmullRomInterpolator, S>(
-            frame,
-            options,
-            CatmullRomInterpolator {},
-        ),
-    }
+    draw_scalogram_color_impl::<f64, S>(frame, options)
 }
 
-fn rgbx_real_spectrograph_color_f32<const S: usize>(
+fn rgbx_real_spectrograph_f32<const S: usize>(
     frame: &SpectrographFrame<f32>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
-    match options.interpolator {
-        Interpolator::Bilinear => draw_scalogram_real_color_impl::<f32, BilinearInterpolator, 3>(
-            frame,
-            options,
-            BilinearInterpolator {},
-        ),
-        Interpolator::CatmullRom => {
-            draw_scalogram_real_color_impl::<f32, CatmullRomInterpolator, 4>(
-                frame,
-                options,
-                CatmullRomInterpolator {},
-            )
-        }
-    }
+    draw_scalogram_real_color_impl::<f32, 3>(frame, options)
 }
 
-fn rgbx_real_spectrograph_color_f64<const S: usize>(
+fn rgbx_real_spectrograph_f64<const S: usize>(
     frame: &SpectrographFrame<f64>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
-    match options.interpolator {
-        Interpolator::Bilinear => draw_scalogram_real_color_impl::<f64, BilinearInterpolator, 3>(
-            frame,
-            options,
-            BilinearInterpolator {},
-        ),
-        Interpolator::CatmullRom => {
-            draw_scalogram_real_color_impl::<f64, CatmullRomInterpolator, 4>(
-                frame,
-                options,
-                CatmullRomInterpolator {},
-            )
-        }
-    }
+    draw_scalogram_real_color_impl::<f64, 3>(frame, options)
 }
 
-pub fn rgb_spectrograph_color_f32(
+pub fn rgb_spectrograph_f32(
     frame: &SpectrographFrame<Complex<f32>>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
-    rgbx_spectrograph_color_f32::<3>(frame, options)
+    rgbx_spectrograph_f32::<3>(frame, options)
 }
 
-pub fn rgb_spectrograph_color_f64(
+pub fn rgb_spectrograph_f64(
     frame: &SpectrographFrame<Complex<f64>>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
-    rgbx_spectrograph_color_f64::<3>(frame, options)
+    rgbx_spectrograph_f64::<3>(frame, options)
 }
 
-pub fn rgba_spectrograph_color_f32(
+pub fn rgba_spectrograph_f32(
     frame: &SpectrographFrame<Complex<f32>>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
-    rgbx_spectrograph_color_f32::<4>(frame, options)
+    rgbx_spectrograph_f32::<4>(frame, options)
 }
 
-pub fn rgba_spectrograph_color_f64(
+pub fn rgba_spectrograph_f64(
     frame: &SpectrographFrame<Complex<f64>>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
-    rgbx_spectrograph_color_f64::<4>(frame, options)
+    rgbx_spectrograph_f64::<4>(frame, options)
 }
 
-pub fn rgb_real_spectrograph_color_f32(
+pub fn rgb_real_spectrograph_f32(
     frame: &SpectrographFrame<f32>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
-    rgbx_real_spectrograph_color_f32::<3>(frame, options)
+    rgbx_real_spectrograph_f32::<3>(frame, options)
 }
 
-pub fn rgb_real_spectrograph_color_f64(
+pub fn rgb_real_spectrograph_f64(
     frame: &SpectrographFrame<f64>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
-    rgbx_real_spectrograph_color_f64::<3>(frame, options)
+    rgbx_real_spectrograph_f64::<3>(frame, options)
 }
 
-pub fn rgba_real_spectrograph_color_f32(
+pub fn rgba_real_spectrograph_f32(
     frame: &SpectrographFrame<f32>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
-    rgbx_real_spectrograph_color_f32::<4>(frame, options)
+    rgbx_real_spectrograph_f32::<4>(frame, options)
 }
 
-pub fn rgba_real_spectrograph_color_f64(
+pub fn rgba_real_spectrograph_f64(
     frame: &SpectrographFrame<f64>,
     options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError> {
-    rgbx_real_spectrograph_color_f64::<4>(frame, options)
+    rgbx_real_spectrograph_f64::<4>(frame, options)
 }

@@ -29,12 +29,13 @@
 #![allow(clippy::excessive_precision, clippy::manual_clamp)]
 use num_traits::real::Real;
 use num_traits::{AsPrimitive, MulAdd, Num, Zero};
+use pic_scale::{ImageSize, Resampling, ResamplingFunction};
 use std::fmt::{Debug, Display};
 use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub};
+use std::sync::Arc;
 
 mod colormap;
 mod err;
-mod interpolator;
 mod mla;
 mod normalizer;
 mod spectrograph;
@@ -73,7 +74,7 @@ impl SpectroSample for f64 {}
 ///
 /// Controls output dimensions, color mapping, normalization, and interpolation
 /// quality. Pass this to the renderer to produce a final image.
-#[derive(Debug, Copy, Clone)]
+#[derive(Clone)]
 pub struct SpectrographOptions {
     /// Width of the output image in pixels.
     pub out_width: usize,
@@ -86,6 +87,22 @@ pub struct SpectrographOptions {
     /// Interpolation algorithm used when resampling the spectrograph data
     /// to the output dimensions.
     pub interpolator: Interpolator,
+    pub context: Option<Arc<SpectrographContext>>,
+}
+
+#[derive(Clone)]
+pub struct SpectrographContext {
+    scaler: Arc<Resampling<f32, 1>>,
+}
+
+impl SpectrographContext {
+    pub fn source_size(&self) -> ImageSize {
+        self.scaler.source_size()
+    }
+
+    pub fn target_size(&self) -> ImageSize {
+        self.scaler.target_size()
+    }
 }
 
 #[derive(Debug, Default, PartialOrd, PartialEq, Copy, Clone)]
@@ -117,16 +134,57 @@ pub enum Normalizer {
 }
 
 /// Interpolation algorithm used when resampling spectrograph/scalogram data.
+///
+/// CWT scalograms contain continuous, smooth energy distributions across time-frequency space.
+/// Higher quality filters better preserve ridge continuity and avoid ringing artifacts
+/// along frequency ridges, at the cost of increased computation.
 #[derive(Debug, Default, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum Interpolator {
-    /// Bilinear interpolation — fast, suitable for real-time preview and
-    /// low-latency rendering. Introduces some blurring but no ringing.
+    /// Lanczos2 — fast resampling suitable for real-time or preview rendering.
+    ///
+    /// Good enough for most scalogram visualizations where exact ridge shape
+    /// is not critical. May introduce slight blurring at sharp energy transitions.
     #[default]
-    Bilinear,
-    /// Catmull-Rom cubic interpolation — smooth C1-continuous resampling with
-    /// good frequency preservation. The recommended default for offline rendering
-    /// and export.
-    CatmullRom,
+    Fast,
+    /// Mitchell-Netravalli — balanced quality/performance for general use.
+    ///
+    /// A good default for final renders. The Mitchell filter's balance between
+    /// blurring and ringing makes it well suited for the smooth energy envelopes
+    /// typical in CWT output, avoiding over-sharpening of ridge artifacts.
+    HighQuality,
+    /// Lanczos5 — maximum fidelity for high-resolution scalogram export.
+    ///
+    /// Preserves fine frequency ridge detail and sharp onset transients
+    /// at the cost of longer computation. Recommended when the output will
+    /// be analyzed further rather than just viewed.
+    SuperHighQuality,
+}
+
+impl Interpolator {
+    pub(crate) fn to_pic_scale(self) -> ResamplingFunction {
+        match self {
+            Interpolator::Fast => ResamplingFunction::Lanczos2,
+            Interpolator::HighQuality => ResamplingFunction::MitchellNetravalli,
+            Interpolator::SuperHighQuality => ResamplingFunction::Lanczos5Jinc,
+        }
+    }
+}
+
+pub fn create_context(
+    interpolator: Interpolator,
+    in_width: usize,
+    in_height: usize,
+    out_width: usize,
+    out_height: usize,
+) -> Result<SpectrographContext, SpectrographError> {
+    let resizer = pic_scale::Scaler::new(interpolator.to_pic_scale());
+    let plan = resizer
+        .plan_planar_resampling_f32(
+            ImageSize::new(in_width, in_height),
+            ImageSize::new(out_width, out_height),
+        )
+        .map_err(|x| SpectrographError::Generic(x.to_string()))?;
+    Ok(SpectrographContext { scaler: plan })
 }
 
 pub struct SpectrographFrame<'a, T: ToOwned>
@@ -138,8 +196,9 @@ where
     pub height: usize,
 }
 
+use crate::err::SpectrographError;
 pub use spectrograph::{
-    rgb_real_spectrograph_color_f32, rgb_real_spectrograph_color_f64, rgb_spectrograph_color_f32,
-    rgb_spectrograph_color_f64, rgba_real_spectrograph_color_f32, rgba_real_spectrograph_color_f64,
-    rgba_spectrograph_color_f32, rgba_spectrograph_color_f64,
+    rgb_real_spectrograph_f32, rgb_real_spectrograph_f64, rgb_spectrograph_f32,
+    rgb_spectrograph_f64, rgba_real_spectrograph_f32, rgba_real_spectrograph_f64,
+    rgba_spectrograph_f32, rgba_spectrograph_f64,
 };
