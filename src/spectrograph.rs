@@ -152,18 +152,24 @@ where
         .resample(&s_frame, &mut resized)
         .map_err(|x| SpectrographError::Generic(x.to_string()))?;
 
+    const S: f32 = 1. / 8192.;
+    let mut lut = Box::new([[0u8; 3]; 65536]);
+    for (i, dst) in lut[..8193].iter_mut().enumerate() {
+        *dst = handle.interpolate(i as f32 * S);
+    }
+
     for (src_row, dst_row) in resized
         .buffer
         .borrow()
         .chunks_exact(out_width)
         .zip(img.chunks_exact_mut(out_width * N))
     {
-        // flip vertically (high freq on top)
+        // flipped vertically (high freq on top)
         for (&src_px, px) in src_row
             .iter()
             .zip(dst_row.as_chunks_mut::<N>().0.iter_mut())
         {
-            let new_rgb = handle.interpolate(src_px.max(0.).min(1.));
+            let new_rgb = lut[((src_px.min(1.) * 8192.0) as u16) as usize];
             px[0] = new_rgb[0];
             px[1] = new_rgb[1];
             px[2] = new_rgb[2];
@@ -264,17 +270,24 @@ where
         .resample(&s_frame, &mut resized)
         .map_err(|x| SpectrographError::Generic(x.to_string()))?;
 
+    const S: f32 = 1. / 8192.;
+    let mut lut = Box::new([[0u8; 3]; 65536]);
+    for (i, dst) in lut[..8193].iter_mut().enumerate() {
+        *dst = handle.interpolate(i as f32 * S);
+    }
+
     for (src_row, dst_row) in resized
         .buffer
         .borrow()
         .chunks_exact(out_width)
         .zip(img.chunks_exact_mut(out_width * N))
     {
+        // flipped vertically (high freq on top)
         for (&src_px, px) in src_row
             .iter()
             .zip(dst_row.as_chunks_mut::<N>().0.iter_mut())
         {
-            let new_rgb = handle.interpolate(src_px.max(0.).min(1.));
+            let new_rgb = lut[((src_px.min(1.) * 8192.0) as u16) as usize];
             px[0] = new_rgb[0];
             px[1] = new_rgb[1];
             px[2] = new_rgb[2];
