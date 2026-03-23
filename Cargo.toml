@@ -18,7 +18,7 @@ rust-version = "1.89.0"
 num-traits = "0.2.19"
 num-complex = "0.4.6"
 pxfm = "0.1.27"
-pic-scale = "0.7.0"
+pic-scale = "0.7.1"
 
 [package.metadata.docs.rs]
 # To build locally:

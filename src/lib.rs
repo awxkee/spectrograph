@@ -92,7 +92,8 @@ pub struct SpectrographOptions {
 
 #[derive(Clone)]
 pub struct SpectrographContext {
-    scaler: Arc<Resampling<f32, 1>>,
+    scaler: Arc<Resampling<u16, 1>>,
+    scaler_accurate: Arc<Resampling<f32, 1>>,
 }
 
 impl SpectrographContext {
@@ -179,12 +180,22 @@ pub fn create_context(
 ) -> Result<SpectrographContext, SpectrographError> {
     let resizer = pic_scale::Scaler::new(interpolator.to_pic_scale());
     let plan = resizer
+        .plan_planar_resampling16(
+            ImageSize::new(in_width, in_height),
+            ImageSize::new(out_width, out_height),
+            12,
+        )
+        .map_err(|x| SpectrographError::Generic(x.to_string()))?;
+    let plan2 = resizer
         .plan_planar_resampling_f32(
             ImageSize::new(in_width, in_height),
             ImageSize::new(out_width, out_height),
         )
         .map_err(|x| SpectrographError::Generic(x.to_string()))?;
-    Ok(SpectrographContext { scaler: plan })
+    Ok(SpectrographContext {
+        scaler: plan,
+        scaler_accurate: plan2,
+    })
 }
 
 pub struct SpectrographFrame<'a, T: ToOwned>

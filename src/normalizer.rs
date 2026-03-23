@@ -37,6 +37,178 @@ pub(crate) fn normalize_power<T: SpectroSample>(
     coeffs: &[Complex<T>],
     normalizer: Normalizer,
     width: usize,
+) -> Result<Vec<u16>, SpectrographError>
+where
+    f64: AsPrimitive<T>,
+{
+    const SCALE: f32 = 4095.0;
+
+    let mut output = try_vec![0u16; coeffs.len()];
+
+    match normalizer {
+        Normalizer::Power => {
+            let mut max = T::zero();
+            // temp pass: store raw power as f32 reinterpreted — we need a scratch buffer
+            let mut scratch = try_vec![0.0f32; coeffs.len()];
+            for (dst, v) in scratch
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let p = fmla(v.re, v.re, v.im * v.im);
+                    max = max.max(p);
+                    *dst = p.as_();
+                }
+            }
+            let inv: f32 = if max > T::zero() {
+                SCALE / max.as_()
+            } else {
+                0.0
+            };
+            for (dst, v) in output.iter_mut().zip(scratch.iter()) {
+                *dst = (v * inv).clamp(0.0, SCALE).round() as u16;
+            }
+        }
+
+        Normalizer::Magnitude => {
+            let mut max = T::zero();
+            let mut scratch = try_vec![0.0f32; coeffs.len()];
+            for (dst, v) in scratch
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let m = fmla(v.re, v.re, v.im * v.im).sqrt();
+                    max = max.max(m);
+                    *dst = m.as_();
+                }
+            }
+            let inv = if max > T::zero() {
+                SCALE / max.as_()
+            } else {
+                0.0
+            };
+            for (dst, v) in output.iter_mut().zip(scratch.iter()) {
+                *dst = (v * inv).clamp(0.0, SCALE).round() as u16;
+            }
+        }
+
+        Normalizer::PowerSqrt => {
+            let mut max_power = T::zero();
+            let mut scratch = try_vec![0.0f32; coeffs.len()];
+            for (dst, v) in scratch
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let p = fmla(v.re, v.re, v.im * v.im);
+                    max_power = max_power.max(p);
+                    *dst = p.as_();
+                }
+            }
+            let inv = if max_power > T::zero() {
+                SCALE / max_power.sqrt().as_()
+            } else {
+                0.0f32
+            };
+            for (dst, v) in output.iter_mut().zip(scratch.iter()) {
+                *dst = (v.sqrt() * inv).clamp(0.0, SCALE).round() as u16;
+            }
+        }
+
+        Normalizer::DecibelsDb { floor_db } => {
+            let floor = floor_db;
+            let recip_floor = -SCALE / floor;
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let power: f32 = fmla(v.re, v.re, v.im * v.im).as_();
+                    let db = if power > 1e-10 {
+                        10.0 * f_log10f(power)
+                    } else {
+                        floor
+                    };
+                    *dst = ((db - floor) * recip_floor).clamp(0.0, SCALE).round() as u16;
+                }
+            }
+        }
+
+        Normalizer::LogMagnitude => {
+            let mut max = 0.0f32;
+            let mut scratch = try_vec![0.0f32; coeffs.len()];
+            for (dst, v) in scratch
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let m: f32 = fmla(v.re, v.re, v.im * v.im).as_();
+                    let lm = f_log1pf(m);
+                    max = max.max(lm);
+                    *dst = lm;
+                }
+            }
+            let inv = if max > 0.0 { SCALE / max } else { 0.0 };
+            for (dst, v) in output.iter_mut().zip(scratch.iter()) {
+                *dst = (v * inv).clamp(0.0, SCALE).round() as u16;
+            }
+        }
+
+        Normalizer::MeanNormalized => {
+            let mut sum = 0.0f32;
+            let mut scratch = try_vec![0.0f32; coeffs.len()];
+            for (dst, v) in scratch
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let p: f32 = fmla(v.re, v.re, v.im * v.im).as_();
+                    sum += p;
+                    *dst = p;
+                }
+            }
+            let mean = if coeffs.is_empty() {
+                1.0
+            } else {
+                sum / coeffs.len() as f32
+            };
+            let inv = if mean > 1e-10 { SCALE / mean } else { 0.0 };
+            for (dst, v) in output.iter_mut().zip(scratch.iter()) {
+                *dst = (v * inv).clamp(0.0, SCALE).round() as u16;
+            }
+        }
+
+        Normalizer::LocalMax { radius } => {
+            let mut scratch = try_vec![0.0f32; coeffs.len()];
+            for (dst, v) in scratch
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    *dst = fmla(v.re, v.re, v.im * v.im).as_();
+                }
+            }
+            let source = scratch.clone();
+            for (i, (dst, &val)) in output.iter_mut().zip(scratch.iter()).enumerate() {
+                let lo = i.saturating_sub(radius);
+                let hi = (i + radius + 1).min(source.len());
+                let local_max = source[lo..hi].iter().cloned().fold(0.0f32, f32::max);
+                *dst = if local_max > 1e-10 {
+                    (val / local_max * SCALE).clamp(0.0, SCALE).round() as u16
+                } else {
+                    0
+                };
+            }
+        }
+    }
+    Ok(output)
+}
+
+pub(crate) fn normalize_power_f32<T: SpectroSample>(
+    coeffs: &[Complex<T>],
+    normalizer: Normalizer,
+    width: usize,
 ) -> Result<Vec<f32>, SpectrographError>
 where
     f64: AsPrimitive<T>,
