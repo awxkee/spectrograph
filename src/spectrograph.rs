@@ -26,6 +26,7 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+use crate::cache::colormap_lut_12bit;
 use crate::err::{SpectrographError, try_vec};
 use crate::mla::fmla;
 use crate::normalizer::{normalize_power, normalize_power_f32, normalize_real};
@@ -39,26 +40,26 @@ fn normalized_to_intensity(x: f32) -> f32 {
     x * 255.
 }
 
-struct ColormapHandle<'a> {
-    r_slice: &'a [f32],
-    g_slice: &'a [f32],
-    b_slice: &'a [f32],
-    cap: f32,
+pub(crate) struct ColormapHandle<'a> {
+    pub(crate) r_slice: &'a [f32],
+    pub(crate) g_slice: &'a [f32],
+    pub(crate) b_slice: &'a [f32],
+    pub(crate) cap: f32,
 }
 
 impl ColormapHandle<'_> {
     #[inline(always)]
-    fn interpolate(&self, x: f32) -> [u8; 3] {
+    pub(crate) fn interpolate(&self, x: f32) -> [u8; 3] {
         let a = (x * self.cap).floor();
         let b = self.cap.min(a.ceil());
         let f = fmla(x, self.cap, -a);
-        let new_r0 = unsafe { *self.r_slice.get_unchecked(a as usize) };
-        let new_g0 = unsafe { *self.g_slice.get_unchecked(a as usize) };
-        let new_b0 = unsafe { *self.b_slice.get_unchecked(a as usize) };
+        let new_r0 = self.r_slice[a as usize];
+        let new_g0 = self.g_slice[a as usize];
+        let new_b0 = self.b_slice[a as usize];
 
-        let new_r1 = unsafe { self.r_slice.get_unchecked(b as usize) };
-        let new_g1 = unsafe { self.g_slice.get_unchecked(b as usize) };
-        let new_b1 = unsafe { self.b_slice.get_unchecked(b as usize) };
+        let new_r1 = self.r_slice[b as usize];
+        let new_g1 = self.g_slice[b as usize];
+        let new_b1 = self.b_slice[b as usize];
         [
             normalized_to_intensity(fmla(new_r1 - new_r0, f, new_r0)).round() as u8,
             normalized_to_intensity(fmla(new_g1 - new_g0, f, new_g0)).round() as u8,
@@ -227,11 +228,7 @@ where
         .resample(&s_frame, &mut resized)
         .map_err(|x| SpectrographError::Generic(x.to_string()))?;
 
-    const S: f32 = 1. / 4095.;
-    let mut lut = Box::new([[0u8; 3]; 65536]);
-    for (i, dst) in lut[..4096].iter_mut().enumerate() {
-        *dst = handle.interpolate(i as f32 * S);
-    }
+    let lut = colormap_lut_12bit(options.colormap);
 
     for (src_row, dst_row) in resized
         .buffer
@@ -259,7 +256,7 @@ where
 
 fn draw_scalogram_real_color_impl<T: SpectroSample, const N: usize>(
     frame: &SpectrographFrame<T>,
-    spectrograph_options: SpectrographOptions,
+    options: SpectrographOptions,
 ) -> Result<Vec<u8>, SpectrographError>
 where
     f64: AsPrimitive<T>,
@@ -278,23 +275,19 @@ where
         ));
     }
 
-    let out_width = spectrograph_options.out_width;
-    let out_height = spectrograph_options.out_height;
+    let out_width = options.out_width;
+    let out_height = options.out_height;
 
     let _ = (out_height as isize)
         .checked_mul(out_width as isize)
         .ok_or(SpectrographError::PointerOverflow)?;
 
-    let (r_slice, g_slice, b_slice) = spectrograph_options.colormap.colorset();
+    let (r_slice, g_slice, b_slice) = options.colormap.colorset();
 
     assert_eq!(r_slice.len(), g_slice.len());
     assert_eq!(r_slice.len(), b_slice.len());
 
-    let norm = normalize_real(
-        frame.data.as_ref(),
-        spectrograph_options.normalizer,
-        frame.width,
-    )?;
+    let norm = normalize_real(frame.data.as_ref(), options.normalizer, frame.width)?;
     let mut img = try_vec![0u8; out_width * out_height * N];
 
     let handle = ColormapHandle {
@@ -304,11 +297,11 @@ where
         cap: r_slice.len() as f32 - 1.,
     };
 
-    let resizing_plan = spectrograph_options
+    let resizing_plan = options
         .context
         .map(|x| Ok(x.scaler_accurate.clone()))
         .unwrap_or_else(|| {
-            let resizer = pic_scale::Scaler::new(spectrograph_options.interpolator.to_pic_scale());
+            let resizer = pic_scale::Scaler::new(options.interpolator.to_pic_scale());
             resizer
                 .plan_planar_resampling_f32(
                     ImageSize::new(frame.width, frame.height),

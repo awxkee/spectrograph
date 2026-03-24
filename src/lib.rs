@@ -39,6 +39,7 @@ mod err;
 mod mla;
 mod normalizer;
 mod spectrograph;
+mod cache;
 
 pub use colormap::Colormap;
 
@@ -166,7 +167,7 @@ impl Interpolator {
         match self {
             Interpolator::Fast => ResamplingFunction::Lanczos2,
             Interpolator::HighQuality => ResamplingFunction::MitchellNetravalli,
-            Interpolator::SuperHighQuality => ResamplingFunction::Lanczos5Jinc,
+            Interpolator::SuperHighQuality => ResamplingFunction::Lanczos5,
         }
     }
 }
