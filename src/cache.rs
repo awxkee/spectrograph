@@ -79,5 +79,9 @@ pub(crate) fn colormap_lut_12bit(colormap: Colormap) -> &'static [[u8; 3]; 65536
         Colormap::Bone => cached!(Colormap::Bone),
         Colormap::Hsv => cached!(Colormap::Hsv),
         Colormap::Afmhot => cached!(Colormap::Afmhot),
+        Colormap::Rdbu => cached!(Colormap::Rdbu),
+        Colormap::Cubehelix => cached!(Colormap::Cubehelix),
+        Colormap::Gnuplot2 => cached!(Colormap::Gnuplot2),
+        Colormap::Terrain => cached!(Colormap::Terrain),
     }
 }

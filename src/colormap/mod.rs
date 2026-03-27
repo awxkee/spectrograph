@@ -32,6 +32,8 @@ use crate::colormap::cividis::{CIVIDIS_B, CIVIDIS_G, CIVIDIS_R};
 use crate::colormap::cool::{COOL_B, COOL_G, COOL_R};
 use crate::colormap::cool_warm::{COOLWARM_B, COOLWARM_G, COOLWARM_R};
 use crate::colormap::copper::{COPPER_B, COPPER_G, COPPER_R};
+use crate::colormap::cubehelix::{CUBEHELIX_B, CUBEHELIX_G, CUBEHELIX_R};
+use crate::colormap::gnuplot::{GNUPLOT2_B, GNUPLOT2_G, GNUPLOT2_R};
 use crate::colormap::grays::{GRAYS_B, GRAYS_G, GRAYS_R};
 use crate::colormap::hot::{HOT_B, HOT_G, HOT_R};
 use crate::colormap::hsv::{HSV_B, HSV_G, HSV_R};
@@ -41,9 +43,11 @@ use crate::colormap::magma::{MAGMA_B, MAGMA_G, MAGMA_R};
 use crate::colormap::ocean::{OCEAN_B, OCEAN_G, OCEAN_R};
 use crate::colormap::pink::{PINK_B, PINK_G, PINK_R};
 use crate::colormap::plasma::{PLASMA_B, PLASMA_G, PLASMA_R};
+use crate::colormap::rdbu::{RDBU_B, RDBU_G, RDBU_R};
 use crate::colormap::spectral::{SPECTRAL_B, SPECTRAL_G, SPECTRAL_R};
 use crate::colormap::spring::{SPRING_B, SPRING_G, SPRING_R};
 use crate::colormap::summer::{SUMMER_B, SUMMER_G, SUMMER_R};
+use crate::colormap::terrain::{TERRAIN_B, TERRAIN_G, TERRAIN_R};
 use crate::colormap::turbo::{TURBO_B, TURBO_G, TURBO_R};
 use crate::colormap::twilight::{TWILIGHT_B, TWILIGHT_G, TWILIGHT_R};
 use crate::colormap::twilight_shifted::{TWILIGHT_S_B, TWILIGHT_S_G, TWILIGHT_S_R};
@@ -56,6 +60,8 @@ mod cividis;
 mod cool;
 mod cool_warm;
 mod copper;
+mod cubehelix;
+mod gnuplot;
 mod grays;
 mod hot;
 mod hsv;
@@ -65,9 +71,11 @@ mod magma;
 mod ocean;
 mod pink;
 mod plasma;
+mod rdbu;
 mod spectral;
 mod spring;
 mod summer;
+mod terrain;
 mod turbo;
 mod twilight;
 mod twilight_shifted;
@@ -99,6 +107,10 @@ pub enum Colormap {
     Bone,
     Hsv,
     Afmhot,
+    Rdbu,
+    Cubehelix,
+    Gnuplot2,
+    Terrain,
 }
 
 impl Colormap {
@@ -178,6 +190,22 @@ impl Colormap {
                 AFMHOT_R.as_slice(),
                 AFMHOT_G.as_slice(),
                 AFMHOT_B.as_slice(),
+            ),
+            Colormap::Rdbu => (RDBU_R.as_slice(), RDBU_G.as_slice(), RDBU_B.as_slice()),
+            Colormap::Cubehelix => (
+                CUBEHELIX_R.as_slice(),
+                CUBEHELIX_G.as_slice(),
+                CUBEHELIX_B.as_slice(),
+            ),
+            Colormap::Gnuplot2 => (
+                GNUPLOT2_R.as_slice(),
+                GNUPLOT2_G.as_slice(),
+                GNUPLOT2_B.as_slice(),
+            ),
+            Colormap::Terrain => (
+                TERRAIN_R.as_slice(),
+                TERRAIN_G.as_slice(),
+                TERRAIN_B.as_slice(),
             ),
         }
     }
