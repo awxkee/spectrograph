@@ -34,12 +34,12 @@ use std::fmt::{Debug, Display};
 use std::ops::{Add, AddAssign, Div, Mul, MulAssign, Neg, Sub};
 use std::sync::Arc;
 
+mod cache;
 mod colormap;
 mod err;
 mod mla;
 mod normalizer;
 mod spectrograph;
-mod cache;
 
 pub use colormap::Colormap;
 
@@ -142,7 +142,7 @@ pub enum Normalizer {
 /// along frequency ridges, at the cost of increased computation.
 #[derive(Debug, Default, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum Interpolator {
-    /// Lanczos2 — fast resampling suitable for real-time or preview rendering.
+    /// Lanczos2Jinc — fast resampling suitable for real-time or preview rendering.
     ///
     /// Good enough for most scalogram visualizations where exact ridge shape
     /// is not critical. May introduce slight blurring at sharp energy transitions.
@@ -165,7 +165,7 @@ pub enum Interpolator {
 impl Interpolator {
     pub(crate) fn to_pic_scale(self) -> ResamplingFunction {
         match self {
-            Interpolator::Fast => ResamplingFunction::Lanczos2,
+            Interpolator::Fast => ResamplingFunction::Lanczos2Jinc,
             Interpolator::HighQuality => ResamplingFunction::MitchellNetravalli,
             Interpolator::SuperHighQuality => ResamplingFunction::Lanczos5,
         }
@@ -201,7 +201,7 @@ pub fn create_context(
 
 pub struct SpectrographFrame<'a, T: ToOwned>
 where
-    [T]: ToOwned,
+    [T]: ToOwned<Owned = Vec<T>>,
 {
     pub data: std::borrow::Cow<'a, [T]>,
     pub width: usize,

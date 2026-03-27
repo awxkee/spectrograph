@@ -1,6 +1,6 @@
 [package]
 name = "spectrograph"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2024"
 description = "Spectrogram and scalogram rendering"
 readme = "README.md"
