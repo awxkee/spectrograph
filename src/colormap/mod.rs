@@ -26,13 +26,22 @@
  * // OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
+use crate::colormap::afmhot::{AFMHOT_B, AFMHOT_G, AFMHOT_R};
+use crate::colormap::bone::{BONE_B, BONE_G, BONE_R};
 use crate::colormap::cividis::{CIVIDIS_B, CIVIDIS_G, CIVIDIS_R};
+use crate::colormap::cool::{COOL_B, COOL_G, COOL_R};
+use crate::colormap::cool_warm::{COOLWARM_B, COOLWARM_G, COOLWARM_R};
+use crate::colormap::copper::{COPPER_B, COPPER_G, COPPER_R};
+use crate::colormap::grays::{GRAYS_B, GRAYS_G, GRAYS_R};
+use crate::colormap::hot::{HOT_B, HOT_G, HOT_R};
+use crate::colormap::hsv::{HSV_B, HSV_G, HSV_R};
 use crate::colormap::inferno::{INFERNO_B, INFERNO_G, INFERNO_R};
 use crate::colormap::jet::{JET_B, JET_G, JET_R};
 use crate::colormap::magma::{MAGMA_B, MAGMA_G, MAGMA_R};
 use crate::colormap::ocean::{OCEAN_B, OCEAN_G, OCEAN_R};
 use crate::colormap::pink::{PINK_B, PINK_G, PINK_R};
 use crate::colormap::plasma::{PLASMA_B, PLASMA_G, PLASMA_R};
+use crate::colormap::spectral::{SPECTRAL_B, SPECTRAL_G, SPECTRAL_R};
 use crate::colormap::spring::{SPRING_B, SPRING_G, SPRING_R};
 use crate::colormap::summer::{SUMMER_B, SUMMER_G, SUMMER_R};
 use crate::colormap::turbo::{TURBO_B, TURBO_G, TURBO_R};
@@ -41,13 +50,22 @@ use crate::colormap::twilight_shifted::{TWILIGHT_S_B, TWILIGHT_S_G, TWILIGHT_S_R
 use crate::colormap::viridis::{VIRIDIS_B, VIRIDIS_G, VIRIDIS_R};
 use crate::colormap::winter::{WINTER_B, WINTER_G, WINTER_R};
 
+mod afmhot;
+mod bone;
 mod cividis;
+mod cool;
+mod cool_warm;
+mod copper;
+mod grays;
+mod hot;
+mod hsv;
 mod inferno;
 mod jet;
 mod magma;
 mod ocean;
 mod pink;
 mod plasma;
+mod spectral;
 mod spring;
 mod summer;
 mod turbo;
@@ -72,6 +90,15 @@ pub enum Colormap {
     TwilightShifted,
     Viridis,
     Winter,
+    Hot,
+    CoolWarm,
+    Cool,
+    Grays,
+    Spectral,
+    Copper,
+    Bone,
+    Hsv,
+    Afmhot,
 }
 
 impl Colormap {
@@ -126,6 +153,31 @@ impl Colormap {
                 WINTER_R.as_slice(),
                 WINTER_G.as_slice(),
                 WINTER_B.as_slice(),
+            ),
+            Colormap::Hot => (HOT_R.as_slice(), HOT_G.as_slice(), HOT_B.as_slice()),
+            Colormap::Cool => (COOL_R.as_slice(), COOL_G.as_slice(), COOL_B.as_slice()),
+            Colormap::Grays => (GRAYS_R.as_slice(), GRAYS_G.as_slice(), GRAYS_B.as_slice()),
+            Colormap::CoolWarm => (
+                COOLWARM_R.as_slice(),
+                COOLWARM_G.as_slice(),
+                COOLWARM_B.as_slice(),
+            ),
+            Colormap::Spectral => (
+                SPECTRAL_R.as_slice(),
+                SPECTRAL_G.as_slice(),
+                SPECTRAL_B.as_slice(),
+            ),
+            Colormap::Copper => (
+                COPPER_R.as_slice(),
+                COPPER_G.as_slice(),
+                COPPER_B.as_slice(),
+            ),
+            Colormap::Bone => (BONE_R.as_slice(), BONE_G.as_slice(), BONE_B.as_slice()),
+            Colormap::Hsv => (HSV_R.as_slice(), HSV_G.as_slice(), HSV_B.as_slice()),
+            Colormap::Afmhot => (
+                AFMHOT_R.as_slice(),
+                AFMHOT_G.as_slice(),
+                AFMHOT_B.as_slice(),
             ),
         }
     }

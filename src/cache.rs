@@ -69,6 +69,15 @@ pub(crate) fn colormap_lut_12bit(colormap: Colormap) -> &'static [[u8; 3]; 65536
         Colormap::Summer => cached!(Colormap::Summer),
         Colormap::Twilight => cached!(Colormap::Twilight),
         Colormap::TwilightShifted => cached!(Colormap::TwilightShifted),
-        Colormap::Winter => cached!(Colormap::TwilightShifted),
+        Colormap::Winter => cached!(Colormap::Winter),
+        Colormap::Hot => cached!(Colormap::Hot),
+        Colormap::Cool => cached!(Colormap::Cool),
+        Colormap::Grays => cached!(Colormap::Grays),
+        Colormap::CoolWarm => cached!(Colormap::CoolWarm),
+        Colormap::Spectral => cached!(Colormap::Spectral),
+        Colormap::Copper => cached!(Colormap::Copper),
+        Colormap::Bone => cached!(Colormap::Bone),
+        Colormap::Hsv => cached!(Colormap::Hsv),
+        Colormap::Afmhot => cached!(Colormap::Afmhot),
     }
 }
