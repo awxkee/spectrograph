@@ -2,7 +2,7 @@
 
 ```rust
 use spectrograph::{
-    rgb_spectrograph_color_f32,
+    rgb_spectrograph_f32,
     SpectrumFrame,
     SpectrographOptions,
     Normalizer,
@@ -16,7 +16,7 @@ fn main() {
     // - stft.width (number of frames)
     // - stft.height (number of frequency bins)
 
-    let image = rgb_spectrograph_color_f32(
+    let image = rgb_spectrograph_f32(
         &SpectrographFrame {
             data: std::borrow::Cow::Borrowed(stft.data.borrow()),
             width: stft.width,
