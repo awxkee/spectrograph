@@ -545,3 +545,192 @@ where
 
     Ok(output)
 }
+
+const BITS12_MAX: f32 = 4095.0; // 2^12 - 1
+
+#[inline(always)]
+fn to_u12(v: f32) -> u16 {
+    (v.max(0.0).min(1.0) * BITS12_MAX).round() as u16
+}
+
+pub(crate) fn normalize_real_12bit<T: SpectroSample>(
+    frame: &[T],
+    normalizer: Normalizer,
+    width: usize,
+) -> Result<Vec<u16>, SpectrographError>
+where
+    f64: AsPrimitive<T>,
+{
+    match normalizer {
+        Normalizer::Power => {
+            let mut scratch = try_vec![0.0f32; frame.len()];
+            let mut max = T::zero();
+            for (dst, v) in scratch
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, &v) in dst.iter_mut().zip(v.iter()) {
+                    let p = v * v;
+                    max = max.max(p);
+                    *dst = p.as_();
+                }
+            }
+            let inv = if max > T::zero() {
+                1.0 / max.as_()
+            } else {
+                0.0
+            };
+            let mut output = try_vec![0u16; frame.len()];
+            for (dst, &v) in output.iter_mut().zip(scratch.iter()) {
+                *dst = to_u12(v * inv);
+            }
+            Ok(output)
+        }
+
+        Normalizer::Magnitude => {
+            let mut scratch = try_vec![0.0f32; frame.len()];
+            let mut max = T::zero();
+            for (dst, v) in scratch
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let m = v.abs();
+                    max = max.max(m);
+                    *dst = m.as_();
+                }
+            }
+            let inv = if max > T::zero() {
+                1.0 / max.as_()
+            } else {
+                0.0
+            };
+            let mut output = try_vec![0u16; frame.len()];
+            for (dst, &v) in output.iter_mut().zip(scratch.iter()) {
+                *dst = to_u12(v * inv);
+            }
+            Ok(output)
+        }
+
+        Normalizer::PowerSqrt => {
+            let mut scratch = try_vec![0.0f32; frame.len()];
+            let mut max_power = T::zero();
+            for (dst, v) in scratch
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, &v) in dst.iter_mut().zip(v.iter()) {
+                    let p = v * v;
+                    max_power = max_power.max(p);
+                    *dst = p.as_();
+                }
+            }
+            let inv = if max_power > T::zero() {
+                1.0 / max_power.as_().sqrt()
+            } else {
+                0.0
+            };
+            let mut output = try_vec![0u16; frame.len()];
+            for (dst, &v) in output.iter_mut().zip(scratch.iter()) {
+                *dst = to_u12(v.sqrt() * inv);
+            }
+            Ok(output)
+        }
+
+        Normalizer::LogMagnitude => {
+            let mut scratch = try_vec![0.0f32; frame.len()];
+            let mut max = 0.0f32;
+            for (dst, v) in scratch
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, &v) in dst.iter_mut().zip(v.iter()) {
+                    let lm = f_log1pf((v * v).as_());
+                    max = max.max(lm);
+                    *dst = lm;
+                }
+            }
+            let inv = if max > 0.0 { 1.0 / max } else { 0.0 };
+            let mut output = try_vec![0u16; frame.len()];
+            for (dst, &v) in output.iter_mut().zip(scratch.iter()) {
+                *dst = to_u12(v * inv);
+            }
+            Ok(output)
+        }
+
+        Normalizer::MeanNormalized => {
+            let mut scratch = try_vec![0.0f32; frame.len()];
+            let mut sum = 0.0f32;
+            for (dst, v) in scratch
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, &v) in dst.iter_mut().zip(v.iter()) {
+                    let p: f32 = (v * v).as_();
+                    sum += p;
+                    *dst = p;
+                }
+            }
+            let mean = if frame.is_empty() {
+                1.0
+            } else {
+                sum / frame.len() as f32
+            };
+            let inv = if mean > 1e-10 { 1.0 / mean } else { 0.0 };
+            let mut output = try_vec![0u16; frame.len()];
+            for (dst, &v) in output.iter_mut().zip(scratch.iter()) {
+                *dst = to_u12(v * inv);
+            }
+            Ok(output)
+        }
+        Normalizer::DecibelsDb { floor_db } => {
+            let floor = floor_db;
+            let max_power = frame.iter().map(|&v| (v * v).as_()).fold(0.0f32, f32::max);
+            let max_power_recip = if max_power != 0. {
+                max_power.recip()
+            } else {
+                0.
+            };
+            let inv_range = if floor != 0.0 { 1.0 / (-floor) } else { 0.0 };
+            let mut output = try_vec![0u16; frame.len()];
+            for (chunks_out, chunks_in) in output
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, &v) in chunks_out.iter_mut().zip(chunks_in.iter()) {
+                    let power: f32 = (v * v).as_();
+                    let db = if max_power > 1e-10 && power > 1e-10 {
+                        10.0 * f_log10f(power * max_power_recip)
+                    } else {
+                        floor
+                    };
+                    *dst = to_u12((db - floor) * inv_range);
+                }
+            }
+            Ok(output)
+        }
+        Normalizer::LocalMax { radius } => {
+            let mut scratch = try_vec![0.0f32; frame.len()];
+            for (dst, v) in scratch
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, &v) in dst.iter_mut().zip(v.iter()) {
+                    *dst = (v * v).as_();
+                }
+            }
+            let mut output = try_vec![0u16; frame.len()];
+            for (i, dst) in output.iter_mut().enumerate() {
+                let lo = i.saturating_sub(radius);
+                let hi = (i + radius + 1).min(scratch.len());
+                let local_max = scratch[lo..hi].iter().cloned().fold(0.0f32, f32::max);
+                *dst = to_u12(if local_max > 1e-10 {
+                    scratch[i] / local_max
+                } else {
+                    0.0
+                });
+            }
+            Ok(output)
+        }
+    }
+}
