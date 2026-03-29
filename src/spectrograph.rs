@@ -35,7 +35,8 @@ use crate::normalizer::{
 use crate::{Interpolator, SpectroSample, SpectrographFrame, SpectrographOptions};
 use num_complex::Complex;
 use num_traits::AsPrimitive;
-use pic_scale::{ImageSize, ImageStore, ImageStoreMut};
+use pic_scale::{ImageSize, ImageStore, ImageStoreMut, Resampling};
+use std::sync::Arc;
 
 #[inline(always)]
 fn normalized_to_intensity(x: f32) -> f32 {
@@ -68,6 +69,74 @@ impl ColormapHandle<'_> {
             normalized_to_intensity(fmla(new_b1 - new_b0, f, new_b0)).round() as u8,
         ]
     }
+}
+
+fn validate_plan<T: Copy, const N: usize>(
+    plan: Arc<Resampling<T, N>>,
+    src: ImageSize,
+    dst: ImageSize,
+) -> Result<(), SpectrographError> {
+    if plan.source_size() != src {
+        return Err(SpectrographError::Generic(
+            format!(
+                "Invalid source size in passed context, expected {:?}, but got {:?}",
+                src,
+                plan.source_size(),
+            )
+            .to_string(),
+        ));
+    }
+    if plan.target_size() != dst {
+        return Err(SpectrographError::Generic(
+            format!(
+                "Invalid target size in passed context, expected {:?}, but got {:?}",
+                dst,
+                plan.target_size()
+            )
+            .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+#[inline(always)]
+fn apply_lut_row<const N: usize>(src_row: &[u16], dst_row: &mut [u8], lut: &[[u8; 3]]) {
+    for (&src_px, px) in src_row
+        .iter()
+        .zip(dst_row.as_chunks_mut::<N>().0.iter_mut())
+    {
+        let new_rgb = lut[src_px as usize];
+        px[0] = new_rgb[0];
+        px[1] = new_rgb[1];
+        px[2] = new_rgb[2];
+        if N == 4 {
+            px[3] = 255;
+        }
+    }
+}
+
+#[inline(always)]
+fn apply_lut_row_f32<const N: usize>(src_row: &[f32], dst_row: &mut [u8], lut: &[[u8; 3]; 65536]) {
+    for (&src_px, px) in src_row
+        .iter()
+        .zip(dst_row.as_chunks_mut::<N>().0.iter_mut())
+    {
+        let new_rgb = lut[((src_px.min(1.) * 8192.0) as u16) as usize];
+        px[0] = new_rgb[0];
+        px[1] = new_rgb[1];
+        px[2] = new_rgb[2];
+        if N == 4 {
+            px[3] = 255;
+        }
+    }
+}
+
+fn build_f32_lut(handle: &ColormapHandle<'_>) -> Box<[[u8; 3]; 65536]> {
+    let mut lut = Box::new([[0u8; 3]; 65536]);
+    for (i, dst) in lut[..8193].iter_mut().enumerate() {
+        *dst = handle.interpolate(i as f32 / 8192.0);
+    }
+    lut
 }
 
 fn draw_scalogram_color_impl<T: SpectroSample, const N: usize>(
@@ -118,7 +187,8 @@ where
             .context
             .map(|x| Ok(x.scaler_accurate.clone()))
             .unwrap_or_else(|| {
-                let resizer = pic_scale::Scaler::new(options.interpolator.to_pic_scale());
+                let resizer = pic_scale::Scaler::new(options.interpolator.to_pic_scale())
+                    .set_multi_step_upsampling(true);
                 resizer
                     .plan_planar_resampling_f32(
                         ImageSize::new(frame.width, frame.height),
@@ -127,26 +197,11 @@ where
                     .map_err(|x| SpectrographError::Generic(x.to_string()))
             })?;
 
-        if resizing_plan.source_size() != ImageSize::new(frame.width, frame.height) {
-            return Err(SpectrographError::Generic(
-                format!(
-                    "Invalid source size in passed context, expected {:?}, but got {:?}",
-                    resizing_plan.source_size(),
-                    ImageSize::new(frame.width, frame.height)
-                )
-                .to_string(),
-            ));
-        }
-        if resizing_plan.target_size() != ImageSize::new(out_width, out_height) {
-            return Err(SpectrographError::Generic(
-                format!(
-                    "Invalid source size in passed context, expected {:?}, but got {:?}",
-                    resizing_plan.target_size(),
-                    ImageSize::new(out_width, out_height)
-                )
-                .to_string(),
-            ));
-        }
+        validate_plan(
+            resizing_plan.clone(),
+            ImageSize::new(frame.width, frame.height),
+            ImageSize::new(out_width, out_height),
+        )?;
 
         let mut resized = ImageStoreMut::<f32, 1>::alloc(out_width, out_height);
         let s_frame = ImageStore::<f32, 1>::borrow(&norm, frame.width, frame.height)
@@ -155,11 +210,7 @@ where
             .resample(&s_frame, &mut resized)
             .map_err(|x| SpectrographError::Generic(x.to_string()))?;
 
-        const S: f32 = 1. / 8192.;
-        let mut lut = Box::new([[0u8; 3]; 65536]);
-        for (i, dst) in lut[..8193].iter_mut().enumerate() {
-            *dst = handle.interpolate(i as f32 * S);
-        }
+        let lut = build_f32_lut(&handle);
 
         for (src_row, dst_row) in resized
             .buffer
@@ -167,19 +218,7 @@ where
             .chunks_exact(out_width)
             .zip(img.chunks_exact_mut(out_width * N))
         {
-            // flipped vertically (high freq on top)
-            for (&src_px, px) in src_row
-                .iter()
-                .zip(dst_row.as_chunks_mut::<N>().0.iter_mut())
-            {
-                let new_rgb = lut[((src_px.min(1.) * 8192.0) as u16) as usize];
-                px[0] = new_rgb[0];
-                px[1] = new_rgb[1];
-                px[2] = new_rgb[2];
-                if N == 4 {
-                    px[3] = 255;
-                }
-            }
+            apply_lut_row_f32::<N>(src_row, dst_row, &lut);
         }
 
         return Ok(img);
@@ -192,7 +231,8 @@ where
         .context
         .map(|x| Ok(x.scaler.clone()))
         .unwrap_or_else(|| {
-            let resizer = pic_scale::Scaler::new(options.interpolator.to_pic_scale());
+            let resizer = pic_scale::Scaler::new(options.interpolator.to_pic_scale())
+                .set_multi_step_upsampling(true);
             resizer
                 .plan_planar_resampling16(
                     ImageSize::new(frame.width, frame.height),
@@ -202,26 +242,11 @@ where
                 .map_err(|x| SpectrographError::Generic(x.to_string()))
         })?;
 
-    if resizing_plan.source_size() != ImageSize::new(frame.width, frame.height) {
-        return Err(SpectrographError::Generic(
-            format!(
-                "Invalid source size in passed context, expected {:?}, but got {:?}",
-                resizing_plan.source_size(),
-                ImageSize::new(frame.width, frame.height)
-            )
-            .to_string(),
-        ));
-    }
-    if resizing_plan.target_size() != ImageSize::new(out_width, out_height) {
-        return Err(SpectrographError::Generic(
-            format!(
-                "Invalid source size in passed context, expected {:?}, but got {:?}",
-                resizing_plan.target_size(),
-                ImageSize::new(out_width, out_height)
-            )
-            .to_string(),
-        ));
-    }
+    validate_plan(
+        resizing_plan.clone(),
+        ImageSize::new(frame.width, frame.height),
+        ImageSize::new(out_width, out_height),
+    )?;
 
     let mut resized = ImageStoreMut::<u16, 1>::alloc_with_depth(out_width, out_height, 12);
     let s_frame = ImageStore::<u16, 1>::borrow(&norm, frame.width, frame.height)
@@ -238,19 +263,7 @@ where
         .chunks_exact(out_width)
         .zip(img.chunks_exact_mut(out_width * N))
     {
-        // flipped vertically (high freq on top)
-        for (&src_px, px) in src_row
-            .iter()
-            .zip(dst_row.as_chunks_mut::<N>().0.iter_mut())
-        {
-            let new_rgb = lut[src_px as usize];
-            px[0] = new_rgb[0];
-            px[1] = new_rgb[1];
-            px[2] = new_rgb[2];
-            if N == 4 {
-                px[3] = 255;
-            }
-        }
+        apply_lut_row::<N>(src_row, dst_row, lut);
     }
 
     Ok(img)
@@ -304,7 +317,8 @@ where
             .context
             .map(|x| Ok(x.scaler_accurate.clone()))
             .unwrap_or_else(|| {
-                let resizer = pic_scale::Scaler::new(options.interpolator.to_pic_scale());
+                let resizer = pic_scale::Scaler::new(options.interpolator.to_pic_scale())
+                    .set_multi_step_upsampling(true);
                 resizer
                     .plan_planar_resampling_f32(
                         ImageSize::new(frame.width, frame.height),
@@ -313,26 +327,11 @@ where
                     .map_err(|x| SpectrographError::Generic(x.to_string()))
             })?;
 
-        if resizing_plan.source_size() != ImageSize::new(frame.width, frame.height) {
-            return Err(SpectrographError::Generic(
-                format!(
-                    "Invalid source size in passed context, expected {:?}, but got {:?}",
-                    resizing_plan.source_size(),
-                    ImageSize::new(frame.width, frame.height)
-                )
-                .to_string(),
-            ));
-        }
-        if resizing_plan.target_size() != ImageSize::new(out_width, out_height) {
-            return Err(SpectrographError::Generic(
-                format!(
-                    "Invalid source size in passed context, expected {:?}, but got {:?}",
-                    resizing_plan.target_size(),
-                    ImageSize::new(out_width, out_height)
-                )
-                .to_string(),
-            ));
-        }
+        validate_plan(
+            resizing_plan.clone(),
+            ImageSize::new(frame.width, frame.height),
+            ImageSize::new(out_width, out_height),
+        )?;
 
         let mut resized = ImageStoreMut::<f32, 1>::alloc_with_depth(out_width, out_height, 12);
         let s_frame = ImageStore::<f32, 1>::borrow(&norm, frame.width, frame.height)
@@ -341,11 +340,7 @@ where
             .resample(&s_frame, &mut resized)
             .map_err(|x| SpectrographError::Generic(x.to_string()))?;
 
-        const S: f32 = 1. / 8192.;
-        let mut lut = Box::new([[0u8; 3]; 65536]);
-        for (i, dst) in lut[..8193].iter_mut().enumerate() {
-            *dst = handle.interpolate(i as f32 * S);
-        }
+        let lut = build_f32_lut(&handle);
 
         for (src_row, dst_row) in resized
             .buffer
@@ -353,19 +348,7 @@ where
             .chunks_exact(out_width)
             .zip(img.chunks_exact_mut(out_width * N))
         {
-            // flipped vertically (high freq on top)
-            for (&src_px, px) in src_row
-                .iter()
-                .zip(dst_row.as_chunks_mut::<N>().0.iter_mut())
-            {
-                let new_rgb = lut[((src_px.min(1.) * 8192.0) as u16) as usize];
-                px[0] = new_rgb[0];
-                px[1] = new_rgb[1];
-                px[2] = new_rgb[2];
-                if N == 4 {
-                    px[3] = 255;
-                }
-            }
+            apply_lut_row_f32::<N>(src_row, dst_row, &lut);
         }
 
         return Ok(img);
@@ -377,7 +360,8 @@ where
         .context
         .map(|x| Ok(x.scaler.clone()))
         .unwrap_or_else(|| {
-            let resizer = pic_scale::Scaler::new(options.interpolator.to_pic_scale());
+            let resizer = pic_scale::Scaler::new(options.interpolator.to_pic_scale())
+                .set_multi_step_upsampling(true);
             resizer
                 .plan_planar_resampling16(
                     ImageSize::new(frame.width, frame.height),
@@ -387,26 +371,11 @@ where
                 .map_err(|x| SpectrographError::Generic(x.to_string()))
         })?;
 
-    if resizing_plan.source_size() != ImageSize::new(frame.width, frame.height) {
-        return Err(SpectrographError::Generic(
-            format!(
-                "Invalid source size in passed context, expected {:?}, but got {:?}",
-                resizing_plan.source_size(),
-                ImageSize::new(frame.width, frame.height)
-            )
-            .to_string(),
-        ));
-    }
-    if resizing_plan.target_size() != ImageSize::new(out_width, out_height) {
-        return Err(SpectrographError::Generic(
-            format!(
-                "Invalid source size in passed context, expected {:?}, but got {:?}",
-                resizing_plan.target_size(),
-                ImageSize::new(out_width, out_height)
-            )
-            .to_string(),
-        ));
-    }
+    validate_plan(
+        resizing_plan.clone(),
+        ImageSize::new(frame.width, frame.height),
+        ImageSize::new(out_width, out_height),
+    )?;
 
     let mut resized = ImageStoreMut::<u16, 1>::alloc_with_depth(out_width, out_height, 12);
     let s_frame = ImageStore::<u16, 1>::borrow(&norm, frame.width, frame.height)
@@ -423,19 +392,7 @@ where
         .chunks_exact(out_width)
         .zip(img.chunks_exact_mut(out_width * N))
     {
-        // flipped vertically (high freq on top)
-        for (&src_px, px) in src_row
-            .iter()
-            .zip(dst_row.as_chunks_mut::<N>().0.iter_mut())
-        {
-            let new_rgb = lut[src_px as usize];
-            px[0] = new_rgb[0];
-            px[1] = new_rgb[1];
-            px[2] = new_rgb[2];
-            if N == 4 {
-                px[3] = 255;
-            }
-        }
+        apply_lut_row::<N>(src_row, dst_row, lut);
     }
 
     Ok(img)

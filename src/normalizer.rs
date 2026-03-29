@@ -31,7 +31,7 @@ use crate::mla::fmla;
 use crate::{Normalizer, SpectroSample};
 use num_complex::Complex;
 use num_traits::{AsPrimitive, One, Zero};
-use pxfm::{f_log1pf, f_log10f};
+use pxfm::{f_log1pf, f_log10f, f_tanhf};
 
 pub(crate) fn normalize_power<T: SpectroSample>(
     coeffs: &[Complex<T>],
@@ -199,6 +199,21 @@ where
                 } else {
                     0
                 };
+            }
+        }
+        Normalizer::Tanh { gain } => {
+            let inv_tanh_gain = 1.0 / f_tanhf(gain);
+            let mut output = try_vec![0u16; coeffs.len()];
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let power: f32 = fmla(v.re, v.re, v.im * v.im).as_();
+                    *dst = (f_tanhf(power * gain) * inv_tanh_gain * SCALE)
+                        .clamp(0.0, SCALE)
+                        .round() as u16;
+                }
             }
         }
     }
@@ -371,6 +386,18 @@ where
                 };
             }
         }
+        Normalizer::Tanh { gain } => {
+            let inv_tanh_gain = 1.0 / f_tanhf(gain);
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(coeffs.chunks_exact(width))
+            {
+                for (dst, v) in dst.iter_mut().zip(v.iter()) {
+                    let power: f32 = fmla(v.re, v.re, v.im * v.im).as_();
+                    *dst = (f_tanhf(power * gain) * inv_tanh_gain).clamp(0.0, 1.0);
+                }
+            }
+        }
     }
     Ok(output)
 }
@@ -462,6 +489,8 @@ where
                 0.
             };
 
+            let neg_rcp_floor = 1. / (-floor);
+
             for (dst, v) in output
                 .rchunks_exact_mut(width)
                 .zip(frame.chunks_exact(width))
@@ -473,7 +502,7 @@ where
                     } else {
                         floor
                     };
-                    *dst = ((db - floor) / (-floor)).clamp(0.0, 1.0);
+                    *dst = ((db - floor) * neg_rcp_floor).clamp(0.0, 1.0);
                 }
             }
         }
@@ -539,6 +568,18 @@ where
                 } else {
                     0.0
                 };
+            }
+        }
+        Normalizer::Tanh { gain } => {
+            let inv_tanh_gain = 1.0 / f_tanhf(gain);
+            for (dst, v) in output
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, &v) in dst.iter_mut().zip(v.iter()) {
+                    let power: f32 = (v * v).as_();
+                    *dst = (f_tanhf(power * gain) * inv_tanh_gain).clamp(0.0, 1.0);
+                }
             }
         }
     }
@@ -729,6 +770,20 @@ where
                 } else {
                     0.0
                 });
+            }
+            Ok(output)
+        }
+        Normalizer::Tanh { gain } => {
+            let inv_tanh_gain = 1.0 / f_tanhf(gain);
+            let mut output = try_vec![0u16; frame.len()];
+            for (chunks_out, chunks_in) in output
+                .rchunks_exact_mut(width)
+                .zip(frame.chunks_exact(width))
+            {
+                for (dst, &v) in chunks_out.iter_mut().zip(chunks_in.iter()) {
+                    let power: f32 = (v * v).as_();
+                    *dst = to_u12(f_tanhf(power * gain) * inv_tanh_gain);
+                }
             }
             Ok(output)
         }
