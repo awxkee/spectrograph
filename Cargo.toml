@@ -1,6 +1,6 @@
 [package]
 name = "spectrograph"
-version = "0.3.6"
+version = "0.3.7"
 edition = "2024"
 description = "Spectrogram and scalogram rendering"
 readme = "README.md"
@@ -18,7 +18,7 @@ rust-version = "1.89.0"
 num-traits = "0.2.19"
 num-complex = "0.4.6"
 pxfm = "0.1.27"
-pic-scale = "0.7.2"
+pic-scale = "0.7.3"
 
 [package.metadata.docs.rs]
 # To build locally:

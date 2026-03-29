@@ -133,6 +133,10 @@ pub enum Normalizer {
         /// Half-window size in bins
         radius: usize,
     },
+    /// Soft-clipping normalizer using a hyperbolic tangent curve.
+    Tanh {
+        gain: f32,
+    },
 }
 
 /// Interpolation algorithm used when resampling spectrograph/scalogram data.
@@ -142,32 +146,22 @@ pub enum Normalizer {
 /// along frequency ridges, at the cost of increased computation.
 #[derive(Debug, Default, Copy, Clone, Ord, PartialOrd, Eq, PartialEq, Hash)]
 pub enum Interpolator {
-    /// Lanczos2Jinc — fast resampling suitable for real-time or preview rendering.
-    ///
-    /// Good enough for most scalogram visualizations where exact ridge shape
-    /// is not critical. May introduce slight blurring at sharp energy transitions.
+    /// Mitchell-Netravalli — balanced quality and performance, recommended for
+    /// most scalogram and spectrogram renders.
     #[default]
     Fast,
-    /// Mitchell-Netravalli — balanced quality/performance for general use.
-    ///
-    /// A good default for final renders. The Mitchell filter's balance between
-    /// blurring and ringing makes it well suited for the smooth energy envelopes
-    /// typical in CWT output, avoiding over-sharpening of ridge artifacts.
+    /// Lanczos3 — sharper rendering for dense source frames.
     HighQuality,
-    /// Lanczos5 — maximum fidelity for high-resolution scalogram export.
-    ///
-    /// Preserves fine frequency ridge detail and sharp onset transients
-    /// at the cost of longer computation. Recommended when the output will
-    /// be analyzed further rather than just viewed.
+    /// Lanczos4 — high-fidelity rendering for large upscale ratios.
     SuperHighQuality,
 }
 
 impl Interpolator {
     pub(crate) fn to_pic_scale(self) -> ResamplingFunction {
         match self {
-            Interpolator::Fast => ResamplingFunction::Lanczos2Jinc,
-            Interpolator::HighQuality => ResamplingFunction::MitchellNetravalli,
-            Interpolator::SuperHighQuality => ResamplingFunction::Lanczos5,
+            Interpolator::Fast => ResamplingFunction::MitchellNetravalli,
+            Interpolator::HighQuality => ResamplingFunction::Lanczos3,
+            Interpolator::SuperHighQuality => ResamplingFunction::Lanczos4,
         }
     }
 }
@@ -179,7 +173,8 @@ pub fn create_context(
     out_width: usize,
     out_height: usize,
 ) -> Result<SpectrographContext, SpectrographError> {
-    let resizer = pic_scale::Scaler::new(interpolator.to_pic_scale());
+    let resizer =
+        pic_scale::Scaler::new(interpolator.to_pic_scale()).set_multi_step_upsampling(true);
     let plan = resizer
         .plan_planar_resampling16(
             ImageSize::new(in_width, in_height),
@@ -208,7 +203,7 @@ where
     pub height: usize,
 }
 
-use crate::err::SpectrographError;
+pub use crate::err::SpectrographError;
 pub use spectrograph::{
     rgb_real_spectrograph_f32, rgb_real_spectrograph_f64, rgb_spectrograph_f32,
     rgb_spectrograph_f64, rgba_real_spectrograph_f32, rgba_real_spectrograph_f64,
